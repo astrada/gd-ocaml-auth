@@ -1,0 +1,30 @@
+application: gd-ocaml-auth
+version: 1
+runtime: python27
+api_version: 1
+threadsafe: true
+
+handlers:
+- url: /
+  static_files: static/index.html
+  upload: static/index\.html
+
+- url: /index\.html
+  static_files: static/index.html
+  upload: static/index\.html
+
+- url: /success\.html
+  static_files: static/success.html
+  upload: static/success\.html
+
+- url: /css
+  static_dir: static/css
+
+- url: /oauth2callback
+  script: main.app
+
+- url: /tokenrequest
+  script: tokenrequest.app
+
+- url: /.*
+  script: main.app
