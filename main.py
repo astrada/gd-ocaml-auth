@@ -13,48 +13,64 @@
 # limitations under the License.
 
 
-# OAuth2
+import logging
 import os
+import simplejson
+import sys
 
+from google.appengine.ext import db
 from google.appengine.api import users
-from oauth2client.client import OAuth2Credentials
 from oauth2client.client import Flow
 from oauth2client.client import flow_from_clientsecrets
+from oauth2client.client import OAuth2Credentials
 from webapp2_extras.appengine.users import login_required
-
-# Datastore
-from google.appengine.ext import db
-
-# JSON
-import simplejson
 
 import webapp2
 
+
+logger = logging.getLogger(__name__)
 
 DATE_FORMAT = '%Y-%m-%dT%H:%M:%SZ'
 CLIENT_SECRETS = os.path.join(os.path.dirname(__file__), 'client_secrets.json')
 SCOPES = 'https://docs.google.com/feeds/ https://docs.googleusercontent.com/ https://spreadsheets.google.com/feeds/'
 
-# Outputs an error page with a message
 def render_error_page(response, error_msg):
+  """Outputs an error page with a message."""
   response.headers['Content-Type'] = 'text/html'
   response.out.write(
       "<html xmlns='http://www.w3.org/1999/xhtml'><head><title>google-drive-ocamlfuse</title><link rel='stylesheet' href='/css/style.css' type='text/css' media='screen' /></head><body><div id='header'><h1>google-drive-ocamlfuse</h1></div><div id='content'><h1>Error</h1><p>{}</p></div></body></html>".format(error_msg))
 
-# Check if an entity is already present in the datastore. Raises ConflictError
-# if it is.
-def check_presence(key):
-  obj = db.get(key)
-  if obj:
-    raise ConflictError
+def render_error_code(response, error_code):
+  """ Outputs an error code to be read by the client application """
+  response.headers['Content-Type'] = 'text/plain'
+  response.out.write(error_code)
+
+def get_auth_data(rid):
+  """Gets an AuthData record from the data store."""
+  key = AuthDataKey(rid)
+  return AuthData.get(key.get_key())
+
+def get_auth_error(rid):
+  """Gets an AuthError record from the data store."""
+  key = db.Key.from_path('AuthError', rid)
+  return AuthError.get(key)
+
+@db.transactional
+def delete_auth_error(rid):
+  """Transactionally deletes an AuthError record from the data store.
+
+  If the record was not saved, do nothing."""
+  auth_error = get_auth_error(rid)
+  if auth_error:
+    auth_error.delete()
   else:
     pass
 
-# Transactionally insert a new instance of AuthData entity, checking if the
-# key was already in use.
 @db.transactional
-def put_auth_data(key, rid, uid, access, refresh):
-  check_presence(key)
+def put_auth_data(auth_data_key, rid, uid, access, refresh):
+  """Transactionally inserts a new instance of AuthData entity, checking if
+  the key was already in use."""
+  auth_data_key.check_presence()
   new_auth_data = AuthData(key_name=rid,
                            request_id=rid,
                            user_id=uid,
@@ -62,12 +78,19 @@ def put_auth_data(key, rid, uid, access, refresh):
                            refresh_token=refresh)
   new_auth_data.put()
 
+def put_auth_error(rid, error_code):
+  """Saves an AuthError record to the datastore."""
+  new_auth_error = AuthError(key_name=rid,
+                             request_id=rid,
+                             error_code=error_code)
+  new_auth_error.put()
+
 class ConflictError(Exception):
-  """ Exception raised when the request_id is already in use """
+  """Exception raised when the request_id is already in use."""
   pass
 
 class AuthData(db.Model):
-  """ Stores oauth2 tokens """
+  """Stores oauth2 tokens."""
   request_id = db.StringProperty(required=True)
   user_id = db.StringProperty(required=True)
   access_token = db.StringProperty(required=True)
@@ -75,6 +98,7 @@ class AuthData(db.Model):
   date = db.DateTimeProperty(auto_now_add=True)
 
   def to_json(self):
+    """Serialize record to JSON."""
     d = {
         'request_id': self.request_id,
         'user_id': self.user_id,
@@ -84,63 +108,99 @@ class AuthData(db.Model):
     }
     return simplejson.dumps(d)
 
+class AuthDataKey:
+  """Helper class to handle AuthData keys."""
+
+  def __init__(self, request_id):
+    """Constructor for AuthDataKey."""
+    self.request_id = request_id
+
+  def get_key(self):
+    """Builds an AuthData key from the request ID."""
+    return db.Key.from_path('AuthData', self.request_id)
+
+  def check_presence(self):
+    """Checks if an entity is already present in the datastore. Raises
+    ConflictError if it is. """
+    key = self.get_key()
+    obj = AuthData.get(key)
+    if obj:
+      raise ConflictError
+    else:
+      pass
+
+class AuthError(db.Model):
+  """Stores request ids that failed getting an auth token."""
+  request_id = db.StringProperty(required=True)
+  error_code = db.StringProperty(required=True)
+
 class OAuth2Handler(webapp2.RequestHandler):
-  """ Handles oauth2 callback """
+  """Handles oauth2 callback."""
+
   @login_required
   def get(self):
+    rid = self.request.get('state')
     error = self.request.get('error')
-    if error:
-      error_msg = self.request.get('error_description', error)
-      self.response.headers['Content-Type'] = 'text/plain'
-      self.response.out.write(
-          'The authorization request failed: %s' % error_msg)
-    else:
-      rid = self.request.get('state')
-      key = db.Key.from_path('AuthData', rid)
-      try:
-        check_presence(key)
-        user = users.get_current_user()
-        flow = flow_from_clientsecrets(
-            CLIENT_SECRETS,
-            SCOPES,
-            'Missing client_secrets.json')
-        if flow:
+    try:
+      delete_auth_error(rid)
+      if error:
+        put_auth_error(rid, error)
+        render_error_page(
+            self.response,
+            'The authorization request failed: {}'.format(error))
+      else:
+        try:
+          auth_data_key = AuthDataKey(rid)
+          auth_data_key.check_presence()
+          user = users.get_current_user()
+          flow = flow_from_clientsecrets(
+              CLIENT_SECRETS,
+              SCOPES,
+              'Missing client_secrets.json')
           # Fake call to step 1 used to set redirect URI in Flow object
           flow.step1_get_authorize_url(
               redirect_uri='http://localhost:8080/oauth2callback')
-          # Real call to step 2
+          # Exchange code for an access token
           credentials = flow.step2_exchange(self.request.params)
           put_auth_data(
-              key, rid, user.user_id(), credentials.access_token,
+              auth_data_key, rid, user.user_id(), credentials.access_token,
               credentials.refresh_token)
           self.redirect('/success.html')
-        else:
-          self.response.headers['Content-Type'] = 'text/plain'
-          self.response.out.write(
-              'The authorization request failed: Cannot continue oauth2 flow')
-      except ConflictError:
-        self.response.headers['Content-Type'] = 'text/plain'
-        self.response.out.write(
-            'The authorization request failed: Request ID conflict')
+        except ConflictError:
+          logger.error('ConflictError: rid={}'.format(rid))
+          put_auth_error(rid, "ConflictError")
+          render_error_page(
+              self.response,
+              'Cannot store authorization tokens: requestid conflict, please try again')
+    except:
+      exc_info = sys.exc_info()
+      logger.error('Exception: type={0} value={1} rid={2}'.format(
+          exc_info[0],
+          exc_info[1],
+          rid))
+      put_auth_error(rid, "Exception")
+      render_error_page(
+          self.response,
+          'Cannot get authorization tokens: please try again')
 
 class GetTokensHandler(webapp2.RequestHandler):
-  """ Returns stored oauth2 tokens by requestid """
+  """Returns stored oauth2 tokens by requestid."""
+
   def get(self):
     rid = self.request.get('requestid')
     if rid:
-      key = db.Key.from_path('AuthData', rid)
-      auth_data = AuthData.get(key)
-      if auth_data:
-        self.response.headers['Content-Type'] = 'application/json'
-        self.response.out.write(auth_data.to_json())
+      auth_error = get_auth_error(rid)
+      if auth_error:
+        render_error_code(self.response, auth_error.error_code)
       else:
-        self.response.headers['Content-Type'] = 'text/plain'
-        self.response.out.write('Not_found')
+        auth_data = get_auth_data(rid)
+        if auth_data:
+          self.response.headers['Content-Type'] = 'application/json'
+          self.response.out.write(auth_data.to_json())
+        else:
+          render_error_code(self.response, 'Not_found')
     else:
-      render_error_page(
-          self.response,
-          'Cannot retrieve authorization tokens: requestid not provided')
-
+      render_error_code(self.response, 'Missing_request_id')
 
 app = webapp2.WSGIApplication(
     [
