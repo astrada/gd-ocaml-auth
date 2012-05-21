@@ -13,13 +13,15 @@
 # limitations under the License.
 
 
+import httplib2
 import logging
 import os
-import simplejson
 import sys
 
 from google.appengine.ext import db
 from google.appengine.api import users
+from oauth2client import clientsecrets
+from oauth2client.anyjson import simplejson
 from oauth2client.client import Flow
 from oauth2client.client import flow_from_clientsecrets
 from oauth2client.client import OAuth2Credentials
@@ -84,6 +86,23 @@ def put_auth_error(rid, error_code):
                              request_id=rid,
                              error_code=error_code)
   new_auth_error.put()
+
+def credentials_from_clientsecrets_authdata(filename, auth_data):
+  """Create a OAuth2Credentials from a clientsecrets file and AuthData
+  record. """
+  client_type, client_info = clientsecrets.loadfile(filename)
+  if client_type in [clientsecrets.TYPE_WEB, clientsecrets.TYPE_INSTALLED]:
+    return OAuth2Credentials(
+        auth_data.access_token,
+        client_info['client_id'],
+        client_info['client_secret'],
+        auth_data.refresh_token,
+        None, # token_expiry
+        'https://accounts.google.com/o/oauth2/token', # token_uri
+        None) # user_agent
+  else:
+    raise UnknownClientSecretsFlowError(
+        'This OAuth 2.0 flow is unsupported: "{}"'.format(client_type))
 
 class ConflictError(Exception):
   """Exception raised when the request_id is already in use."""
@@ -202,10 +221,36 @@ class GetTokensHandler(webapp2.RequestHandler):
     else:
       render_error_code(self.response, 'Missing_request_id')
 
+class RefreshTokenHandler(webapp2.RequestHandler):
+  """Request a new oauth2 access token."""
+
+  def get(self):
+    rid = self.request.get('requestid')
+    if rid:
+      auth_data = get_auth_data(rid)
+      if auth_data:
+        try:
+          credentials = credentials_from_clientsecrets_authdata(
+              CLIENT_SECRETS, auth_data)
+          h = httplib2.Http()
+          credentials.refresh(h)
+          auth_data.access_token = credentials.access_token
+          auth_data.put()
+          self.response.headers['Content-Type'] = 'application/json'
+          self.response.out.write(auth_data.to_json())
+        except:
+          render_error_code(self.response, 'Exception')
+      else:
+        render_error_code(self.response, 'Not_found')
+    else:
+      render_error_code(self.response, 'Missing_request_id')
+
+
 app = webapp2.WSGIApplication(
     [
       ('/oauth2callback', OAuth2Handler),
-      ('/gettokens', GetTokensHandler)
+      ('/gettokens', GetTokensHandler),
+      ('/refreshtoken', RefreshTokenHandler)
     ],
     debug=True)
 
