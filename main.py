@@ -75,7 +75,6 @@ def put_auth_data(auth_data_key, rid, uid, access, refresh):
   auth_data_key.check_presence()
   new_auth_data = AuthData(key_name=rid,
                            request_id=rid,
-                           user_id=uid,
                            access_token=access,
                            refresh_token=refresh)
   new_auth_data.put()
@@ -87,16 +86,16 @@ def put_auth_error(rid, error_code):
                              error_code=error_code)
   new_auth_error.put()
 
-def credentials_from_clientsecrets_authdata(filename, auth_data):
+def credentials_from_clientsecrets_and_token(filename, refresh_token):
   """Create a OAuth2Credentials from a clientsecrets file and AuthData
   record. """
   client_type, client_info = clientsecrets.loadfile(filename)
   if client_type in [clientsecrets.TYPE_WEB, clientsecrets.TYPE_INSTALLED]:
     return OAuth2Credentials(
-        auth_data.access_token,
+        None,
         client_info['client_id'],
         client_info['client_secret'],
-        auth_data.refresh_token,
+        refresh_token,
         None, # token_expiry
         'https://accounts.google.com/o/oauth2/token', # token_uri
         None) # user_agent
@@ -111,19 +110,17 @@ class ConflictError(Exception):
 class AuthData(db.Model):
   """Stores oauth2 tokens."""
   request_id = db.StringProperty(required=True)
-  user_id = db.StringProperty(required=True)
   access_token = db.StringProperty(required=True)
   refresh_token = db.StringProperty(required=True)
-  date = db.DateTimeProperty(auto_now_add=True)
+  refresh_date = db.DateTimeProperty(auto_now_add=True)
 
   def to_json(self):
     """Serialize record to JSON."""
     d = {
         'request_id': self.request_id,
-        'user_id': self.user_id,
         'access_token': self.access_token,
         'refresh_token': self.refresh_token,
-        'date': self.date.strftime(DATE_FORMAT)
+        'refresh_date': self.refresh_date.strftime(DATE_FORMAT)
     }
     return simplejson.dumps(d)
 
@@ -171,7 +168,6 @@ class OAuth2Handler(webapp2.RequestHandler):
         try:
           auth_data_key = AuthDataKey(rid)
           auth_data_key.check_presence()
-          user = users.get_current_user()
           flow = flow_from_clientsecrets(
               CLIENT_SECRETS,
               SCOPES,
@@ -182,7 +178,7 @@ class OAuth2Handler(webapp2.RequestHandler):
           # Exchange code for an access token
           credentials = flow.step2_exchange(self.request.params)
           put_auth_data(
-              auth_data_key, rid, user.user_id(), credentials.access_token,
+              auth_data_key, rid, credentials.access_token,
               credentials.refresh_token)
           self.redirect('/success.html')
         except ConflictError:
@@ -225,25 +221,22 @@ class RefreshTokenHandler(webapp2.RequestHandler):
   """Request a new oauth2 access token."""
 
   def get(self):
-    rid = self.request.get('requestid')
-    if rid:
-      auth_data = get_auth_data(rid)
-      if auth_data:
-        try:
-          credentials = credentials_from_clientsecrets_authdata(
-              CLIENT_SECRETS, auth_data)
-          h = httplib2.Http()
-          credentials.refresh(h)
-          auth_data.access_token = credentials.access_token
-          auth_data.put()
-          self.response.headers['Content-Type'] = 'application/json'
-          self.response.out.write(auth_data.to_json())
-        except:
-          render_error_code(self.response, 'Exception')
-      else:
-        render_error_code(self.response, 'Not_found')
+    token = self.request.get('token')
+    if token:
+      try:
+        credentials = credentials_from_clientsecrets_and_token(
+            CLIENT_SECRETS, token)
+        h = httplib2.Http()
+        credentials.refresh(h)
+        auth_data = AuthData(request_id="dummy",
+                             access_token=credentials.access_token,
+                             refresh_token=token)
+        self.response.headers['Content-Type'] = 'application/json'
+        self.response.out.write(auth_data.to_json())
+      except:
+        render_error_code(self.response, 'Exception')
     else:
-      render_error_code(self.response, 'Missing_request_id')
+      render_error_code(self.response, 'Missing_refresh_token')
 
 
 app = webapp2.WSGIApplication(
