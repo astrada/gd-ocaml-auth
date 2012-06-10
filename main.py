@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 DATE_FORMAT = '%Y-%m-%dT%H:%M:%SZ'
 CLIENT_SECRETS = os.path.join(os.path.dirname(__file__), 'client_secrets.json')
 SCOPES = 'https://docs.google.com/feeds/ https://docs.googleusercontent.com/ https://spreadsheets.google.com/feeds/'
+REDIRECT_URI = 'https://gd-ocaml-auth.appspot.com/oauth2callback'
 
 def render_error_page(response, error_msg):
   """Outputs an error page with a message."""
@@ -69,7 +70,7 @@ def delete_auth_error(rid):
     pass
 
 @db.transactional
-def put_auth_data(auth_data_key, rid, uid, access, refresh):
+def put_auth_data(auth_data_key, rid, access, refresh):
   """Transactionally inserts a new instance of AuthData entity, checking if
   the key was already in use."""
   auth_data_key.check_presence()
@@ -173,8 +174,7 @@ class OAuth2Handler(webapp2.RequestHandler):
               SCOPES,
               'Missing client_secrets.json')
           # Fake call to step 1 used to set redirect URI in Flow object
-          flow.step1_get_authorize_url(
-              redirect_uri='http://localhost:8080/oauth2callback')
+          flow.step1_get_authorize_url(redirect_uri=REDIRECT_URI)
           # Exchange code for an access token
           credentials = flow.step2_exchange(self.request.params)
           put_auth_data(
