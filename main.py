@@ -111,8 +111,8 @@ class ConflictError(Exception):
 class AuthData(db.Model):
   """Stores oauth2 tokens."""
   request_id = db.StringProperty(required=True)
-  access_token = db.StringProperty(required=True)
-  refresh_token = db.StringProperty(required=True)
+  access_token = db.StringProperty(required=False)
+  refresh_token = db.StringProperty(required=False)
   refresh_date = db.DateTimeProperty(auto_now_add=True)
 
   def to_json(self):
@@ -212,6 +212,11 @@ class GetTokensHandler(webapp2.RequestHandler):
         if auth_data:
           self.response.headers['Content-Type'] = 'application/json'
           self.response.out.write(auth_data.to_json())
+          # If everything is fine, clean access tokens and leave the row just
+          # for audit purposes
+          auth_data.access_token = None
+          auth_data.refresh_token = None
+          auth_data.put()
         else:
           render_error_code(self.response, 'Not_found')
     else:
