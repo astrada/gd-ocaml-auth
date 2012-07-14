@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 DATE_FORMAT = '%Y-%m-%dT%H:%M:%SZ'
 CLIENT_SECRETS = os.path.join(os.path.dirname(__file__), 'client_secrets.json')
-SCOPES = 'https://docs.google.com/feeds/ https://docs.googleusercontent.com/ https://spreadsheets.google.com/feeds/'
+SCOPES = 'https://www.googleapis.com/auth/drive'
 REDIRECT_URI = 'https://gd-ocaml-auth.appspot.com/oauth2callback'
 
 def render_error_page(response, error_msg):
