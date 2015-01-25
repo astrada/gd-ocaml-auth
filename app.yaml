@@ -8,23 +8,16 @@ handlers:
 - url: /
   static_files: static/index.html
   upload: static/index\.html
-
 - url: /index\.html
   static_files: static/index.html
   upload: static/index\.html
-
 - url: /success\.html
   static_files: static/success.html
   upload: static/success\.html
-
 - url: /css
   static_dir: static/css
-
 - url: /oauth2callback
   script: main.app
-
-- url: /tokenrequest
-  script: tokenrequest.app
-
+  login: required
 - url: /.*
   script: main.app
