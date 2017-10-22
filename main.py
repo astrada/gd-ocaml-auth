@@ -142,7 +142,7 @@ class OAuth2Handler(webapp2.RequestHandler):
                 put_auth_data(rid, credentials.access_token, credentials.refresh_token)
                 self.redirect('/success.html')
         except Exception, e:
-            logging.error('Exception: type={} message={} rid={}'.format(
+            logging.exception('Exception: type={} message={} rid={}'.format(
                 e.__class__.__name__,
                 e.message,
                 rid))
@@ -195,7 +195,7 @@ class RefreshTokenHandler(webapp2.RequestHandler):
                 self.response.headers['Content-Type'] = 'application/json'
                 self.response.out.write(auth_data.to_json())
             except Exception, e:
-                logging.error('Exception: type={} message={}'.format(
+                logging.exception('Exception: type={} message={}'.format(
                     e.__class__.__name__,
                     e.message))
                 render_error_code(self.response, 'Exception')
@@ -206,5 +206,4 @@ class RefreshTokenHandler(webapp2.RequestHandler):
 app = webapp2.WSGIApplication(
     [('/oauth2callback', OAuth2Handler),
      ('/gettokens', GetTokensHandler),
-     ('/refreshtoken', RefreshTokenHandler)],
-    debug=True)
+     ('/refreshtoken', RefreshTokenHandler)])
