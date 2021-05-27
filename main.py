@@ -33,9 +33,9 @@ def render_error_page(response, error_msg):
     """Outputs an error page with a message."""
     response.headers['Content-Type'] = 'text/html'
     response.out.write(
-        "<html xmlns='http://www.w3.org/1999/xhtml'><head><title>google-drive-ocamlfuse</title>" +
+        "<html xmlns='http://www.w3.org/1999/xhtml'><head><title>gdfuse</title>" +
         "<link rel='stylesheet' href='/css/style.css' type='text/css' media='screen' /></head><body>" +
-        "<div id='header'><h1>google-drive-ocamlfuse</h1></div><div id='content'>" +
+        "<div id='header'><h1>gdfuse</h1></div><div id='content'>" +
         "<h1>Error</h1><p>{}</p></div></body></html>".format(error_msg))
 
 
