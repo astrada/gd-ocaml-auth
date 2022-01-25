@@ -1,3 +1,0 @@
-blacklist:
-- subnet: 62.210.198.102
-  description: a single IP address
